@@ -6,6 +6,11 @@
 //
 
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 public enum MarkupStylePolicy {
     case respectMarkupStyleFromCode
@@ -66,7 +71,40 @@ struct HTMLElementMarkupComponentMarkupStyleVisitor: MarkupVisitor {
     }
     
     func visit(_ markup: ListItemMarkup) -> Result {
-        return defaultVisit(components.value(markup: markup))
+        guard let directParentMarkup = markup.parentMarkup as? ListMarkup else {
+            return defaultVisit(components.value(markup: markup))
+        }
+        
+        var level = 0
+        var parentMarkup: Markup? = directParentMarkup
+        while parentMarkup != nil {
+            if parentMarkup is ListMarkup {
+                level += 1
+            }
+            parentMarkup = parentMarkup?.parentMarkup
+        }
+        
+        let tabInterval: CGFloat = 36
+        let headIndent = CGFloat(level) * tabInterval
+        let markerIndent = headIndent - 25
+        
+        var markupStyle = defaultVisit(components.value(markup: markup)) ?? MarkupStyle()
+        markupStyle.paragraphStyle.headIndent = headIndent
+        markupStyle.paragraphStyle.defaultTabInterval = tabInterval
+        markupStyle.paragraphStyle.paragraphSpacing = 0
+        markupStyle.paragraphStyle.textLists = [directParentMarkup.styleList.nsTextList]
+#if canImport(AppKit)
+        markupStyle.paragraphStyle.tabStops = [
+            NSTextTab(type: .leftTabStopType, location: markerIndent),
+            NSTextTab(type: .leftTabStopType, location: tabInterval),
+        ]
+#elseif canImport(UIKit)
+        markupStyle.paragraphStyle.tabStops = [
+            NSTextTab(textAlignment: .left, location: markerIndent),
+            NSTextTab(textAlignment: .natural, location: headIndent),
+        ]
+#endif
+        return markupStyle
     }
     
     func visit(_ markup: ListMarkup) -> Result {

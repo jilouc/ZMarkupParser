@@ -6,6 +6,11 @@
 //
 
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 struct MarkupNSAttributedStringVisitor: MarkupVisitor {
     
@@ -63,33 +68,50 @@ struct MarkupNSAttributedStringVisitor: MarkupVisitor {
     }
     
     func visit(_ markup: ListItemMarkup) -> Result {
-        let attributedString = collectAttributedString(markup)
-        
-        // We don't set NSTextList to NSParagraphStyle directly, because NSTextList have abnormal extra spaces.
-        // ref: https://stackoverflow.com/questions/66714650/nstextlist-formatting
-        
-        var level = 0
-        var parentMarkup: Markup? = markup.parentMarkup as? ListMarkup
-        while (parentMarkup != nil) {
-            if parentMarkup is ListMarkup {
-                level += 1
-            }
-            parentMarkup = parentMarkup?.parentMarkup
+        guard let parentMarkup = markup.parentMarkup as? ListMarkup else {
+            return collectAttributedString(markup)
         }
-        let indent = String(repeating: " ", count: level)
         
-        if let parentMarkup = markup.parentMarkup as? ListMarkup {
-            let thisAttributedString: NSMutableAttributedString
-            if parentMarkup.styleList.type.isOrder() {
-                let siblingListItems = markup.parentMarkup?.childMarkups.filter({ $0 is ListItemMarkup }) ?? []
-                let position = (siblingListItems.firstIndex(where: { $0 === markup }) ?? 0) + parentMarkup.styleList.startingItemNumber
-                thisAttributedString = NSMutableAttributedString(attributedString: makeString(in: markup, string:indent+parentMarkup.styleList.marker(forItemNumber: position)))
-            } else {
-                thisAttributedString = NSMutableAttributedString(attributedString: makeString(in: markup, string:indent+parentMarkup.styleList.marker(forItemNumber: parentMarkup.styleList.startingItemNumber)))
+        let baseAttributedString = collectAttributedString(markup)
+        let attributedString = NSMutableAttributedString(attributedString: reduceBreaklineInResultNSAttributedString(baseAttributedString))
+        
+        let markupStyle = collectMarkupStyle(markup) ?? .default
+        let listItemParagraphStyle = markupStyle.paragraphStyle.getParagraphStyle() ?? .default
+        
+        // Handle line breaks inside the list item same identation on the new line as the list item
+        let tabStopCount = listItemParagraphStyle.tabStops.count
+        attributedString.mutableString.replaceOccurrences(
+            of: "\n",
+            with: "\n\(String(repeating: "\t", count: tabStopCount))",
+            range: NSRange(location: 0, length: attributedString.string.utf16.count)
+        )
+        
+        let siblingListItems = markup.parentMarkup?.childMarkups.filter({ $0 is ListItemMarkup }) ?? []
+        let positionInSiblings = siblingListItems.firstIndex(where: { $0 === markup }) ?? 0
+        let position = positionInSiblings + parentMarkup.styleList.startingItemNumber
+        let markerAttributedString = makeString(
+            in: markup,
+            string:parentMarkup.styleList.marker(forItemNumber: position),
+            attributes: [
+                .paragraphStyle: listItemParagraphStyle,
+            ]
+        )
+        
+        attributedString.enumerateAttributes(in: NSRange(location: 0, length: attributedString.string.utf16.count)) { attributes, range, _ in
+            guard let paragraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle else {
+                attributedString.addAttribute(.paragraphStyle, value: listItemParagraphStyle, range: range)
+                return
             }
-            attributedString.insert(thisAttributedString, at: 0)
-            attributedString.markSuffixTagBoundaryBreakline()
+            let updatedParagraphStyle = NSMutableParagraphStyle()
+            updatedParagraphStyle.setParagraphStyle(paragraphStyle)
+            updatedParagraphStyle.headIndent = listItemParagraphStyle.headIndent
+            updatedParagraphStyle.defaultTabInterval = listItemParagraphStyle.defaultTabInterval
+            updatedParagraphStyle.tabStops = listItemParagraphStyle.tabStops
+            attributedString.addAttribute(.paragraphStyle, value: updatedParagraphStyle, range: range)
         }
+        
+        attributedString.insert(markerAttributedString, at: 0)
+        attributedString.markSuffixTagBoundaryBreakline()
         
         return attributedString
     }

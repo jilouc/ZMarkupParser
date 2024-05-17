@@ -16,15 +16,23 @@ public struct MarkupStyleList {
     let type: MarkupStyleType
     let format: String
     let startingItemNumber: Int
+    let nsTextList: NSTextList
     
     public init(type: MarkupStyleType, format: String, startingItemNumber: Int) {
         self.type = type
         self.format = format
         self.startingItemNumber = startingItemNumber
+        let nsTextList = NSTextList(markerFormat: type.markerFormat(), options: 0)
+        nsTextList.startingItemNumber = startingItemNumber
+        self.nsTextList = nsTextList
     }
     
-    func marker(forItemNumber: Int) -> String {
-        return type.marker(forItemNumber: forItemNumber, startingItemNumber: startingItemNumber, format: format)
+    func marker(forItemNumber itemNumber: Int) -> String {
+        return "   \(marker(forItemNumber: itemNumber, format: format))   "
+    }
+    
+    private func marker(forItemNumber itemNumber: Int, format: String) -> String {
+        return String(format: format, nsTextList.marker(forItemNumber: itemNumber))
     }
     
     public enum MarkupStyleType {
@@ -55,13 +63,7 @@ public struct MarkupStyleList {
             }
         }
         
-        func marker(forItemNumber: Int, startingItemNumber: Int, format: String) -> String {
-            let textList = NSTextList(markerFormat: self.markerFormat(), options: 0)
-            textList.startingItemNumber = startingItemNumber
-            return String(format: format, textList.marker(forItemNumber: forItemNumber))
-        }
-        
-        private func markerFormat() -> NSTextList.MarkerFormat {
+        fileprivate func markerFormat() -> NSTextList.MarkerFormat {
             switch self {
             case .octal:
                 return .octal
