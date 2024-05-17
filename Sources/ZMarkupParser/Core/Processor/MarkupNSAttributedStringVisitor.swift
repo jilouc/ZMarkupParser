@@ -207,14 +207,13 @@ extension MarkupNSAttributedStringVisitor {
         let totalLength = mutableAttributedString.string.utf16.count
         
         // merge tag Boundary Breakline, e.g. </p></div> -> /n/n -> /n
-        var pre: (NSRange, NSAttributedString.Key.BreaklinePlaceholder)?
+        var pre: (NSRange, NSAttributedString.Key.BreaklinePlaceholder?, [NSAttributedString.Key: Any])?
         mutableAttributedString.enumerateAttribute(.breaklinePlaceholder, in: NSMakeRange(0, totalLength)) { value, range, _ in
             if let breaklinePlaceholder = value as? NSAttributedString.Key.BreaklinePlaceholder {
                 if range.location == 0 {
                     mutableAttributedString.deleteCharacters(in: range)
-                } else if let pre = pre {
+                } else if let pre = pre, let preBreaklinePlaceholder = pre.1 {
                     let preRange = pre.0
-                    let preBreaklinePlaceholder = pre.1
                     
                     switch (preBreaklinePlaceholder, breaklinePlaceholder) {
                     case (.breaklineTag, .tagBoundarySuffix):
@@ -239,10 +238,39 @@ extension MarkupNSAttributedStringVisitor {
                         break
                     }
                 }
-                pre = (range, breaklinePlaceholder)
+                pre = (range, breaklinePlaceholder, [:])
             } else {
                 pre = nil
             }
+        }
+        
+        // Handle line breaks from breaklineTag
+        // They create a new paragraph in the NSAttributedString, but not in the sense of the HTML content
+        // This means no spacing between the new line and the previous one
+        pre = nil
+        mutableAttributedString.enumerateAttributes(in: NSRange(location: 0, length: mutableAttributedString.string.utf16.count), options: []) { attributes, range, _ in
+            if let paragraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle,
+               let brType = attributes[.breaklinePlaceholder] as? NSAttributedString.Key.BreaklinePlaceholder,
+                brType == .breaklineTag
+            {
+                let updatedStyle = NSMutableParagraphStyle()
+                updatedStyle.setParagraphStyle(paragraphStyle)
+                updatedStyle.paragraphSpacingBefore = 0
+                mutableAttributedString.addAttribute(.paragraphStyle, value: updatedStyle, range: range)
+                
+                if let previousRun = pre, let previousParagraphStyle = previousRun.2[.paragraphStyle] as? NSParagraphStyle {
+                    let updatedStyle = NSMutableParagraphStyle()
+                    updatedStyle.setParagraphStyle(previousParagraphStyle)
+                    updatedStyle.paragraphSpacing = 0
+                    mutableAttributedString.addAttribute(.paragraphStyle, value: updatedStyle, range: previousRun.0)
+                }
+            }
+            pre = (range, nil, attributes)
+        }
+        
+        // Remove placeholder attributes so the NSAttributedString can merge consecutive runs if they have the same attributes
+        mutableAttributedString.enumerateAttribute(.breaklinePlaceholder, in: NSRange(location: 0, length: mutableAttributedString.string.utf16.count)) { _, range, _ in
+            mutableAttributedString.removeAttribute(.breaklinePlaceholder, range: range)
         }
         
         return mutableAttributedString
